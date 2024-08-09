@@ -113,7 +113,7 @@ def main():
             st.session_state.current_question = generate_initial_question(topic, llm)
             st.session_state.question_number += 1
             st.session_state.start_time = time.time()
-            st.experimental_rerun()
+            st.rerun()
 
     elif st.session_state.question_number <= 5:
         if st.session_state.current_question:
@@ -149,7 +149,7 @@ def main():
                         )
                     else:
                         st.session_state.total_time = time.time() - st.session_state.start_time
-                    st.experimental_rerun()
+                    st.rerun()
             
             with col2:
                 st.metric("Score", f"{st.session_state.score}/{st.session_state.question_number - 1}")
@@ -165,7 +165,7 @@ def main():
         if st.button("Restart Quiz"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-            st.experimental_rerun()
+            st.rerun()
 
 if __name__ == "__main__":
     main()
