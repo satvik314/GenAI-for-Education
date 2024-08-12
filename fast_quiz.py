@@ -64,6 +64,7 @@ def main():
         st.title("Settings")
         st.markdown("### :red[Enter your GROQ API Key below]")
         api_key = st.text_input("GROQ API Key:", type="password")
+        st.markdown("Follow me on [X](https://x.com/satvikps)")
 
     st.title("Fast Adaptive Quiz")
 
