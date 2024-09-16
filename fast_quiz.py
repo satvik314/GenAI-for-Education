@@ -3,6 +3,8 @@ import os
 import time
 from educhain import qna_engine
 from langchain_openai import ChatOpenAI
+from langchain_core.exceptions import OutputParserException
+from educhain.models import MultipleChoiceQuestion
 
 # Custom template for initial question generation
 custom_template = """
@@ -34,27 +36,67 @@ def get_llm(api_key):
     )
 
 def generate_initial_question(topic, llm):
-    result = qna_engine.generate_mcq(
-        topic=topic,
-        num=1,
-        learning_objective="General knowledge of " + topic,
-        difficulty_level="Medium",
-        llm=llm,
-        prompt_template=custom_template,
-    )
-    return result.questions[0] if result and result.questions else None
+    try:
+        result = qna_engine.generate_mcq(
+            topic=topic,
+            num=1,
+            learning_objective="General knowledge of " + topic,
+            difficulty_level="Medium",
+            llm=llm,
+            prompt_template=custom_template,
+        )
+        return result.questions[0] if result and result.questions else None
+    except OutputParserException:
+        # Fallback: generate a simple question if parsing fails
+        fallback_question = generate_fallback_question(topic, llm)
+        return fallback_question
 
 def generate_next_question(previous_question, user_response, response_correct, topic, llm):
-    result = qna_engine.generate_mcq(
-        topic=topic,
-        num=1,
-        llm=llm,
-        prompt_template=adaptive_template,
-        previous_question=previous_question,
-        user_response=user_response,
-        response_correct=response_correct
+    try:
+        result = qna_engine.generate_mcq(
+            topic=topic,
+            num=1,
+            llm=llm,
+            prompt_template=adaptive_template,
+            previous_question=previous_question,
+            user_response=user_response,
+            response_correct=response_correct
+        )
+        return result.questions[0] if result and result.questions else None
+    except OutputParserException:
+        # Fallback: generate a simple question if parsing fails
+        fallback_question = generate_fallback_question(topic, llm)
+        return fallback_question
+
+def generate_fallback_question(topic, llm):
+    prompt = f"Generate a simple multiple-choice question about {topic} with 4 options and the correct answer. Format your response as follows:\nQuestion: [Your question here]\nA. [Option A]\nB. [Option B]\nC. [Option C]\nD. [Option D]\nCorrect Answer: [Letter of correct option]"
+    response = llm.invoke(prompt)
+    
+    # Parse the response manually
+    lines = response.content.split('\n')
+    question = lines[0].replace("Question: ", "").strip()
+    options = []
+    correct_answer = ""
+    
+    for line in lines[1:]:
+        if line.startswith(("A. ", "B. ", "C. ", "D. ")):
+            options.append(line[3:].strip())
+        elif line.startswith("Correct Answer: "):
+            correct_answer = line.replace("Correct Answer: ", "").strip()
+    
+    # Ensure we have 4 options and a correct answer
+    if len(options) != 4 or not correct_answer:
+        # If parsing fails, create a very simple question
+        question = f"What is a key topic in {topic}?"
+        options = ["Option A", "Option B", "Option C", "Option D"]
+        correct_answer = "A"
+    
+    return MultipleChoiceQuestion(
+        question=question,
+        options=options,
+        answer=options[ord(correct_answer) - ord('A')],
+        explanation=""
     )
-    return result.questions[0] if result and result.questions else None
 
 def main():
     st.set_page_config(page_title="Fast Adaptive Quiz", layout="wide")
@@ -126,6 +168,9 @@ def main():
                 user_answer = st.radio("Choose your answer:", st.session_state.current_question.options, key=f"q{st.session_state.question_number}")
                 
                 if st.button("Submit Answer", key=f"submit{st.session_state.question_number}"):
+                    # Record the time before showing feedback and sleeping
+                    question_end_time = time.time()
+                    
                     correct_answer = st.session_state.current_question.answer
                     if user_answer == correct_answer:
                         st.success("Correct!")
@@ -138,6 +183,9 @@ def main():
                     if st.session_state.current_question.explanation:
                         st.info(f"Explanation: {st.session_state.current_question.explanation}")
 
+                    # Add a delay before showing the next question
+                    time.sleep(3)  # 3-second delay
+
                     st.session_state.question_number += 1
 
                     if st.session_state.question_number <= 5:
@@ -149,13 +197,18 @@ def main():
                             llm
                         )
                     else:
-                        st.session_state.total_time = time.time() - st.session_state.start_time
+                        # Calculate total time without including sleep time
+                        st.session_state.total_time = question_end_time - st.session_state.start_time
                     st.rerun()
             
             with col2:
                 st.metric("Score", f"{st.session_state.score}/{st.session_state.question_number - 1}")
                 st.progress(st.session_state.question_number / 5)
-                elapsed_time = time.time() - st.session_state.start_time
+                # Calculate elapsed time without including sleep time
+                if st.session_state.question_number == 5:
+                    elapsed_time = st.session_state.total_time
+                else:
+                    elapsed_time = time.time() - st.session_state.start_time
                 st.metric("Time", f"{elapsed_time:.2f} seconds")
 
     if st.session_state.question_number > 5:
